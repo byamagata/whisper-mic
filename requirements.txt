@@ -3,3 +3,5 @@ sounddevice
 numpy
 pynput
 scipy
+pytest
+flake8
