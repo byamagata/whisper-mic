@@ -41,6 +41,18 @@ class TextOutput:
         logger.info("Typed %d characters into active field", len(text))
         logger.debug("type_text End")
 
+    def backspace(self, count: int) -> None:
+        """Simulate *count* backspace key presses to delete previously typed text."""
+        logger.debug("backspace Start")
+        logger.debug("backspace count=%d", count)
+
+        for _ in range(count):
+            self._keyboard.press(Key.backspace)
+            self._keyboard.release(Key.backspace)
+
+        logger.info("Backspaced %d characters", count)
+        logger.debug("backspace End")
+
     def type_key(self, key: Key) -> None:
         """Simulate a single special key press (e.g. Key.enter)."""
         logger.debug("type_key Start")

@@ -107,6 +107,46 @@ class TestTypeText:
         process.communicate.assert_called_once_with("cafe\u0301".encode("utf-8"))
 
 
+class TestBackspace:
+    """Test TextOutput.backspace key simulation."""
+
+    def test_backspace_presses_key_n_times(
+        self,
+        output: TextOutput,
+        mock_controller: MagicMock,
+    ) -> None:
+        output.backspace(3)
+
+        assert mock_controller.press.call_count == 3
+        assert mock_controller.release.call_count == 3
+        for c in mock_controller.press.call_args_list:
+            assert c == call(Key.backspace)
+
+    def test_backspace_zero_is_noop(
+        self,
+        output: TextOutput,
+        mock_controller: MagicMock,
+    ) -> None:
+        output.backspace(0)
+
+        mock_controller.press.assert_not_called()
+        mock_controller.release.assert_not_called()
+
+    def test_backspace_press_release_order(
+        self,
+        output: TextOutput,
+        mock_controller: MagicMock,
+    ) -> None:
+        """Each backspace should be a press+release pair."""
+        call_order: list[str] = []
+        mock_controller.press.side_effect = lambda k: call_order.append("press")
+        mock_controller.release.side_effect = lambda k: call_order.append("release")
+
+        output.backspace(2)
+
+        assert call_order == ["press", "release", "press", "release"]
+
+
 class TestTypeKey:
     """Test TextOutput.type_key special key simulation."""
 

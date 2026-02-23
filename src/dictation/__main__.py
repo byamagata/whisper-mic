@@ -25,6 +25,7 @@ _BANNER = """\
 Dictation v{version}
 Model: {model}
 VAD threshold: {threshold}
+Microphone: {device}
 
 Say "dictate" to start typing, "stop" to end.
 Press Ctrl+C to quit.
@@ -74,7 +75,7 @@ def main() -> None:
     args = _build_parser().parse_args()
 
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
@@ -83,18 +84,19 @@ def main() -> None:
         print(sd.query_devices())
         sys.exit(0)
 
+    engine = DictationEngine(
+        model=args.model,
+        vad_threshold=args.vad_threshold,
+        device=args.device,
+    )
+
     print(
         _BANNER.format(
             version=__version__,
             model=args.model,
             threshold=args.vad_threshold,
+            device=engine.device_name,
         )
-    )
-
-    engine = DictationEngine(
-        model=args.model,
-        vad_threshold=args.vad_threshold,
-        device=args.device,
     )
 
     try:

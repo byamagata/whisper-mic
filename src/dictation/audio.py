@@ -39,18 +39,21 @@ class AudioListener:
         vad_threshold: float = 0.5,
         speech_pad_ms: int = 300,
         stream_interval_s: float = 2.0,
+        device: int | None = None,
     ) -> None:
         logger.debug(
             "AudioListener.__init__ Start — sample_rate=%d, vad_threshold=%.2f, "
-            "speech_pad_ms=%d, stream_interval_s=%.1f",
+            "speech_pad_ms=%d, stream_interval_s=%.1f, device=%s",
             sample_rate,
             vad_threshold,
             speech_pad_ms,
             stream_interval_s,
+            device,
         )
 
         self.sample_rate = sample_rate
         self.speech_pad_ms = speech_pad_ms
+        self._device = device
 
         self._model = load_silero_vad()
         self._vad_iterator = VADIterator(
@@ -68,11 +71,22 @@ class AudioListener:
         chunk_duration_s = _BLOCK_SIZE / sample_rate
         self._stream_interval_chunks = max(1, int(stream_interval_s / chunk_duration_s))
 
+        # Resolve the actual device info so callers can display it.
+        device_info = sd.query_devices(self._device, kind="input")
+        self._device_name: str = device_info["name"]
+
         logger.debug(
-            "AudioListener.__init__ End — pad_chunks=%d, stream_interval_chunks=%d",
+            "AudioListener.__init__ End — pad_chunks=%d, stream_interval_chunks=%d, "
+            "device_name=%r",
             self._pad_chunks,
             self._stream_interval_chunks,
+            self._device_name,
         )
+
+    @property
+    def device_name(self) -> str:
+        """Return the name of the active input device."""
+        return self._device_name
 
     def _audio_callback(
         self,
@@ -118,6 +132,7 @@ class AudioListener:
             channels=_CHANNELS,
             dtype=_DTYPE,
             blocksize=_BLOCK_SIZE,
+            device=self._device,
             callback=self._audio_callback,
         )
 

@@ -15,6 +15,7 @@ from dictation.commands import (
     TypeText,
 )
 from dictation.output import TextOutput
+from dictation.punctuation import process_punctuation
 from dictation.transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ class DictationEngine:
 
         self._listener = AudioListener(
             vad_threshold=vad_threshold,
+            device=device,
         )
         self._router = CommandRouter()
         self._output = TextOutput()
@@ -61,8 +63,15 @@ class DictationEngine:
         # so we only type the new suffix on each intermediate transcription.
         self._committed_text = ""
 
+        self._device_name = self._listener.device_name
+
         logger.info("DictationEngine initialized")
         logger.debug("DictationEngine.__init__ End")
+
+    @property
+    def device_name(self) -> str:
+        """Return the name of the active input device."""
+        return self._device_name
 
     def run(self) -> None:
         """Run the main dictation loop until interrupted."""
@@ -88,6 +97,7 @@ class DictationEngine:
                 if self._router.state is AppState.LISTENING:
                     self._handle_listening(text, is_final)
                 else:
+                    text = process_punctuation(text)
                     self._handle_dictating(text, is_final)
 
         except Exception:
@@ -119,7 +129,6 @@ class DictationEngine:
             action = self._router.process(text)
             match action:
                 case StopDictation():
-                    # Type any remaining new text before the stop keyword.
                     self._committed_text = ""
                     print("[LISTENING] Stopped. Waiting for \"dictate\"...")
                     logger.info("Dictation mode deactivated")
@@ -130,57 +139,65 @@ class DictationEngine:
                         display = repr(action_text)
                         print(f"[DICTATING] > typed: {display}")
                     else:
-                        new_text = self._extract_new_text(action_text)
-                        if new_text:
-                            self._output.type_text(new_text)
-                            print(f"[DICTATING] > typed: {new_text}")
+                        self._type_incremental(action_text)
 
                     self._committed_text = ""
 
         else:
             # Intermediate segment: type the new portion of the transcription.
-            new_text = self._extract_new_text(text)
-            if new_text:
-                self._output.type_text(new_text)
-                self._committed_text = text
-                print(f"[DICTATING] > streaming: {new_text}")
-                logger.debug(
-                    "Streamed text: new=%r, committed=%r",
-                    new_text,
-                    self._committed_text,
-                )
+            self._type_incremental(text)
 
-    def _extract_new_text(self, full_text: str) -> str:
-        """Return the portion of *full_text* not yet typed.
+    def _type_incremental(self, full_text: str) -> None:
+        """Type only the new portion of *full_text*, handling Whisper revisions.
 
-        Compares against ``_committed_text`` to find what's new.
-        If the model revised earlier text (full_text doesn't start
-        with committed), we fall back to typing everything after
-        the committed length to avoid getting stuck.
+        Compares against ``_committed_text`` to find what changed.  When
+        the model revises earlier text (e.g. "I am" → "I'm"), we
+        backspace the divergent suffix and retype from the point of
+        divergence so words don't get smooshed together.
         """
         if not self._committed_text:
-            return full_text
+            if full_text:
+                self._output.type_text(full_text)
+                self._committed_text = full_text
+                print(f"[DICTATING] > streaming: {full_text}")
+            return
 
         if full_text.startswith(self._committed_text):
-            return full_text[len(self._committed_text):]
+            new_text = full_text[len(self._committed_text):]
+            if new_text:
+                self._output.type_text(new_text)
+                self._committed_text = full_text
+                print(f"[DICTATING] > streaming: {new_text}")
+            return
 
-        # Model revised earlier output — use length-based fallback.
-        if len(full_text) > len(self._committed_text):
-            new = full_text[len(self._committed_text):]
-            logger.debug(
-                "Text revision detected, using length fallback: committed=%r, full=%r, new=%r",
-                self._committed_text,
-                full_text,
-                new,
-            )
-            return new
+        # Model revised earlier output — find the common prefix,
+        # backspace the divergent tail, and retype from there.
+        common_len = 0
+        for a, b in zip(self._committed_text, full_text):
+            if a != b:
+                break
+            common_len += 1
+
+        backspace_count = len(self._committed_text) - common_len
+        new_text = full_text[common_len:]
 
         logger.debug(
-            "Text revision shorter than committed, skipping: committed=%r, full=%r",
+            "Text revision detected: committed=%r, full=%r, "
+            "common_prefix=%d, backspace=%d, retype=%r",
             self._committed_text,
             full_text,
+            common_len,
+            backspace_count,
+            new_text,
         )
-        return ""
+
+        if backspace_count > 0:
+            self._output.backspace(backspace_count)
+        if new_text:
+            self._output.type_text(new_text)
+
+        self._committed_text = full_text
+        print(f"[DICTATING] > revised: {full_text}")
 
     def _signal_handler(self, signum: int, frame: object) -> None:
         """Handle SIGINT / SIGTERM for graceful shutdown."""
